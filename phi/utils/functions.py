@@ -1,4 +1,6 @@
 import json
+import re
+import ast
 from typing import Optional, Dict, Any
 
 from phi.tools.function import Function, FunctionCall
@@ -26,19 +28,29 @@ def get_function_call(
     if call_id is not None:
         function_call.call_id = call_id
     if arguments is not None and arguments != "":
+        _arguments = None
         try:
-            if function_to_call.sanitize_arguments:
-                if "None" in arguments:
-                    arguments = arguments.replace("None", "null")
-                if "True" in arguments:
-                    arguments = arguments.replace("True", "true")
-                if "False" in arguments:
-                    arguments = arguments.replace("False", "false")
             _arguments = json.loads(arguments)
-        except Exception as e:
-            logger.error(f"Unable to decode function arguments:\n{arguments}\nError: {e}")
-            function_call.error = f"Error while decoding function arguments: {e}\n\n Please make sure we can json.loads() the arguments and retry."
-            return function_call
+        except Exception:
+            if function_to_call.sanitize_arguments:
+                # Try parsing by replacing JSON literals with python literals
+                tmp_args = re.sub(r"\bnull\b", "None", arguments)
+                tmp_args = re.sub(r"\btrue\b", "True", tmp_args)
+                tmp_args = re.sub(r"\bfalse\b", "False", tmp_args)
+                try:
+                    _arguments = ast.literal_eval(tmp_args)
+                except Exception as e:
+                    logger.error(
+                        f"Unable to decode function arguments:\n{arguments}\nError: {e}"
+                    )
+                    function_call.error = (
+                        f"Error while decoding function arguments: {e}\n\n Please make sure we can parse the arguments and retry."
+                    )
+                    return function_call
+            else:
+                logger.error(f"Unable to decode function arguments:\n{arguments}")
+                function_call.error = "Error while decoding function arguments."
+                return function_call
 
         if not isinstance(_arguments, dict):
             logger.error(f"Function arguments are not a valid JSON object: {arguments}")
